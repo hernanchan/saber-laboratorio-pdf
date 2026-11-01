@@ -24,13 +24,13 @@ aside{color:#516274;font-size:13px;margin-top:15px}
 <header><b class="logo">S</b><div><b>LIBRERÍA SABER</b><div><span>Laboratorio privado • Supabase Storage TUS</span></div></div></header>
 <article>
 <h1>Prueba automática con dos PDF</h1>
-<p>Genera archivos sintéticos de 16 y 94 páginas, los sube por una conexión directa segura y verifica páginas y SHA-256 desde el servidor. No son documentos de clientes.</p>
+<p>Genera dos PDF sintéticos de 16 y 94 páginas, ahora con aproximadamente <b>5 y 9 MiB</b> de datos aleatorios para medir transferencia de archivos grandes. Verifica páginas y SHA-256 desde el servidor. No utiliza documentos de clientes.</p>
 <p><b>Esta invitación funciona una sola vez.</b> El ensayo no genera pedidos ni cobra.</p>
 <button id="go">Probar recepción de 2 PDF</button>
 <div id="status" role="status">Listo para iniciar.</div>
 <div id="progress"></div>
 <pre id="result" hidden></pre>
-<aside>El ensayo usa PDF pequeños para validar la recepción. No representa todavía una prueba de velocidad con archivos grandes.</aside>
+<aside>Esta segunda prueba mide carga y verificación de unos 14 MiB sintéticos. No reproduce la complejidad de planos, imágenes ni el circuito de presupuestos y pedidos.</aside>
 </article></main>
 <script type="module">
 const $=id=>document.getElementById(id);
@@ -38,71 +38,128 @@ const startUrl='https://qkbbqzbannyhuanngjpw.supabase.co/functions/v1/lab-tus-on
 const verifyUrl='https://qkbbqzbannyhuanngjpw.supabase.co/functions/v1/lab-tus-one-use/verify';
 const access=new URLSearchParams(location.hash.slice(1)).get('k')||'';
 history.replaceState(null,'',location.pathname);
+const targets=[{pages:16,padBytes:5*1024*1024},{pages:94,padBytes:9*1024*1024}];
+const mib=bytes=>(bytes/1024/1024).toFixed(2);
+const seconds=ms=>(ms/1000).toFixed(2);
 $('go').onclick=async()=>{
  $('go').disabled=true;
  $('result').hidden=true;
  let stage='inicio';
  const t0=performance.now();
  try{
-  if(!/^[a-f0-9]{64}$/.test(access))throw Error('Enlace inválido.');
+  if(!/^[a-f0-9]{64}$/.test(access))throw Error('Enlace privado inválido o ausente.');
   const {Uppy,Dashboard,Tus}=await import('https://releases.transloadit.com/uppy/v3.6.1/uppy.min.mjs');
   const {PDFDocument}=await import('https://esm.sh/pdf-lib@1.17.1');
-  stage='iniciando permiso';
-  $('status').textContent='Solicitando autorización privada para 2 archivos…';
-  const res=await fetch(startUrl,{method:'POST',headers:{'x-lab-token':access,'content-type':'application/json'},body:'{}'});
+  stage='generando PDF grandes';
+  const generated=[];
+  for(let i=0;i<2;i++){
+   const {pages,padBytes}=targets[i];
+   $('status').textContent='Preparando PDF '+(i+1)+' de 2 ('+(padBytes/1024/1024)+' MiB de datos sintéticos)…';
+   const doc=await PDFDocument.create();
+   for(let j=0;j<pages;j++)doc.addPage([595.28,841.89]);
+   // Datos aleatorios, prácticamente incompresibles. Medimos transporte;
+   // no simulamos tinta, gráficos, CAD ni archivos de clientes.
+   const entropy=new Uint8Array(padBytes);
+   for(let pos=0;pos<entropy.length;pos+=65536)
+    crypto.getRandomValues(entropy.subarray(pos,Math.min(pos+65536,entropy.length)));
+   await doc.attach(entropy,'relleno_sintetico_'+(i+1)+'.bin',{
+    mimeType:'application/octet-stream',
+    description:'Datos aleatorios de laboratorio; no contienen información personal',
+   });
+   const bytes=await doc.save();
+   if(bytes.byteLength<padBytes || bytes.byteLength>20*1024*1024)
+    throw Error('El PDF generado no cumple el tamaño esperado para la prueba.');
+   const digest=await crypto.subtle.digest('SHA-256',bytes);
+   const hex=Array.from(new Uint8Array(digest)).map(v=>v.toString(16).padStart(2,'0')).join('');
+   const name='ensayo_'+pages+'_paginas_'+mib(bytes.byteLength)+'MiB.pdf';
+   generated.push({
+    name,pages,bytes:bytes.byteLength,hash:hex,
+    file:new File([bytes],name,{type:'application/pdf'}),
+   });
+  }
+  const generatedAt=performance.now();
+  stage='autorizando dos PDF';
+  $('status').textContent='Archivos de '+mib(generated[0].bytes)+' y '+mib(generated[1].bytes)+' MiB listos. Solicitando firmas privadas…';
+  const res=await fetch(startUrl,{
+   method:'POST',
+   headers:{'x-lab-token':access,'content-type':'application/json'},
+   body:'{}',
+  });
   const accessData=await res.json();
-  if(!res.ok||!accessData.ok||accessData.uploads?.length!==2)throw Error('No se pudo iniciar la prueba privada (HTTP '+res.status+').');
-  const prep=performance.now();
-  const uu=new Uppy({autoProceed:false,restrictions:{maxNumberOfFiles:2,minNumberOfFiles:2,allowedFileTypes:['.pdf','application/pdf']}});
-  uu.use(Dashboard,{inline:true,target:'#progress',height:190,hideUploadButton:true,showProgressDetails:true,proudlyDisplayPoweredByUppy:false});
+  if(!res.ok||!accessData.ok||accessData.uploads?.length!==2)
+   throw Error('No se pudo autorizar la tanda (HTTP '+res.status+').');
+  const authorizedAt=performance.now();
+  const uu=new Uppy({autoProceed:false,restrictions:{
+   maxNumberOfFiles:2,minNumberOfFiles:2,allowedFileTypes:['.pdf','application/pdf'],
+  }});
+  uu.use(Dashboard,{
+   inline:true,target:'#progress',height:190,hideUploadButton:true,
+   showProgressDetails:true,proudlyDisplayPoweredByUppy:false,
+  });
   uu.use(Tus,{
     endpoint:'https://'+accessData.projectRef+'.storage.supabase.co/storage/v1/upload/resumable/sign',
-    headers:file=>({apikey:accessData.apikey,'x-signature':file.meta.labSignature}),uploadDataDuringCreation:true,
-    retryDelays:[0,1200,3000],chunkSize:6*1024*1024,limit:2,
+    headers:file=>({apikey:accessData.apikey,'x-signature':file.meta.labSignature}),
+    uploadDataDuringCreation:true,
+    retryDelays:[0,1200,3000],
+    chunkSize:6*1024*1024,limit:2,
     allowedMetaFields:['bucketName','objectName','contentType','cacheControl'],
   });
   const fileDescriptors=[];
-  stage='generando PDF';
   for(let i=0;i<2;i++){
-   const pages=i===0?16:94;
-   const doc=await PDFDocument.create();
-   for(let j=0;j<pages;j++)doc.addPage([595.28,841.89]);
-   const bytes=await doc.save();
-   const digest=await crypto.subtle.digest('SHA-256',bytes);
-   const hex=Array.from(new Uint8Array(digest)).map(v=>v.toString(16).padStart(2,'0')).join('');
-   const name='ensayo_'+pages+'_paginas.pdf';
-   const file=new File([bytes],name,{type:'application/pdf'});
+   const {name,pages,bytes,hash,file}=generated[i];
    const id=uu.addFile({name,type:'application/pdf',data:file,source:'laboratorio'});
-   uu.setFileMeta(id,{bucketName:accessData.bucket,objectName:accessData.uploads[i].objectName,contentType:'application/pdf',cacheControl:'0',labSignature:accessData.uploads[i].signature});
-   fileDescriptors.push({objectName:accessData.uploads[i].objectName,expectedSha256:hex,pages,bytes:bytes.byteLength});
+   uu.setFileMeta(id,{
+    bucketName:accessData.bucket,objectName:accessData.uploads[i].objectName,
+    contentType:'application/pdf',cacheControl:'0',
+    labSignature:accessData.uploads[i].signature,
+   });
+   fileDescriptors.push({
+    objectName:accessData.uploads[i].objectName,
+    expectedSha256:hash,pages,bytes,
+   });
   }
   const uploadStarted=performance.now();
-  stage='subiendo PDF';
-  $('status').textContent='Subiendo ambos PDF directamente a Supabase…';
-  const result=await uu.upload();
+  stage='subiendo PDF grandes';
+  $('status').textContent='Subiendo '+mib(fileDescriptors[0].bytes)+' y '+mib(fileDescriptors[1].bytes)+' MiB directamente a Supabase…';
+  const outcome=await uu.upload();
   const uploadFinished=performance.now();
-  if(result.failed?.length || result.successful?.length!==2)throw Error('La transferencia TUS quedó incompleta.');
-  stage='verificando SHA y páginas';
-  $('status').textContent='Ambos PDF subidos. Comprobando integridad y páginas en servidor…';
-  const verify=await fetch(verifyUrl,{method:'POST',headers:{'x-lab-token':access,'content-type':'application/json'},body:JSON.stringify({files:fileDescriptors.map(({objectName,expectedSha256})=>({objectName,expectedSha256}))})});
-  const confirmation=await verify.json();
-  if(!verify.ok || !confirmation.ok||confirmation.verified!==2)throw Error('La verificación independiente no pudo confirmar los dos PDF.');
+  if(outcome.failed?.length||outcome.successful?.length!==2)
+   throw Error('La transferencia TUS no finalizó para ambos PDF.');
+  stage='verificando integridad y páginas';
+  $('status').textContent='Dos PDF subidos. Verificando SHA-256, tamaño y páginas desde el servidor…';
+  const check=await fetch(verifyUrl,{
+   method:'POST',
+   headers:{'x-lab-token':access,'content-type':'application/json'},
+   body:JSON.stringify({
+    files:fileDescriptors.map(({objectName,expectedSha256})=>({objectName,expectedSha256})),
+   }),
+  });
+  const confirmation=await check.json();
+  if(!check.ok||!confirmation.ok||confirmation.verified!==2)
+   throw Error('El servidor no confirmó ambos PDF (HTTP '+check.status+').');
   for(let i=0;i<2;i++)
-   if(confirmation.files[i].pages!==fileDescriptors[i].pages||!confirmation.files[i].sha256Match||confirmation.files[i].bytes!==fileDescriptors[i].bytes)
-    throw Error('Las páginas, bytes o SHA no coinciden.');
+   if(confirmation.files[i].pages!==fileDescriptors[i].pages||
+      !confirmation.files[i].sha256Match||
+      confirmation.files[i].bytes!==fileDescriptors[i].bytes)
+    throw Error('SHA-256, bytes o número de páginas distintos de los originales.');
   const done=performance.now();
-  $('status').textContent='ÉXITO: 2 de 2 PDF recibidos y verificados, sin cobros.';
+  $('status').textContent='ÉXITO: dos PDF grandes recibidos y verificados, sin pedidos ni cobros.';
   $('result').hidden=false;
   $('result').textContent=JSON.stringify({
-   verificados:'2 de 2',paginas:[16,94],integridadSha256:'correcta',
-   tiempoTotalSegundos:((done-t0)/1000).toFixed(2),
-   tiempoPreparacionSegundos:((uploadStarted-prep)/1000).toFixed(2),
-   tiempoSubidaSegundos:((uploadFinished-uploadStarted)/1000).toFixed(2),
-   tiempoVerificacionSegundos:((done-uploadFinished)/1000).toFixed(2),
+   verificados:'2 de 2',
+   paginas:fileDescriptors.map(f=>f.pages),
+   tamanosMiB:fileDescriptors.map(f=>mib(f.bytes)),
+   integridadSHA256:'verificada servidor',
+   tiempoTotalSegundos:seconds(done-t0),
+   tiempoGeneracionSegundos:seconds(generatedAt-t0),
+   tiempoAutorizacionSegundos:seconds(authorizedAt-generatedAt),
+   tiempoSubidaSegundos:seconds(uploadFinished-uploadStarted),
+   tiempoVerificacionSegundos:seconds(done-uploadFinished),
+   fragmentoTUSMiB:6,
    pedidosRegistrados:0,cobros:false,
   },null,2);
  }catch(error){
-  $('status').textContent='ERROR EN '+stage.toUpperCase()+': no se confirmó la recepción. No reintentar.';
+  $('status').textContent='ERROR EN '+stage.toUpperCase()+'. No reintentar.';
   $('result').hidden=false;
   $('result').textContent=String(error?.message||'Error no identificado.');
  }
