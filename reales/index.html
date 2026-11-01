@@ -155,7 +155,9 @@ $('go').addEventListener('click',async()=>{
   if(!res.ok||!granted?.ok||granted.uploads?.length!==2)
    throw Error('No se obtuvo autorización para ambos archivos (HTTP '+res.status+').');
   initiated=true; authorized=performance.now();
-  clearInvite(); // Desde este punto el servidor ya consumió el uso único.
+  // Invitación consumida: quitar persistencia, pero conservarla en esta ejecución
+  // porque el endpoint /verify necesita autenticar ESTA misma tanda.
+  try{sessionStorage.removeItem(INVITE_KEY)}catch(_){}
   const uppy=new Uppy({autoProceed:false,restrictions:{
    maxNumberOfFiles:2,minNumberOfFiles:2,maxFileSize:LIMIT,allowedFileTypes:['.pdf','application/pdf'],
   }});
@@ -208,6 +210,7 @@ $('go').addEventListener('click',async()=>{
     throw Error('El PDF '+(i+1)+' no coincide en páginas, tamaño o SHA.');
   }
   const done=performance.now();
+  clearInvite();
   $('status').textContent=confirmation.deletedAfterVerification===true
    ? 'ÉXITO: dos PDF recibidos, verificados y retirados del almacenamiento.'
    : '2 PDF verificados. ATENCIÓN: la eliminación del almacenamiento aún no está confirmada.';
