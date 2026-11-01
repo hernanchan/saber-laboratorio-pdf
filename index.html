@@ -183,7 +183,9 @@ $('go').addEventListener('click',async()=>{
     throw Error('El PDF '+(i+1)+' no coincide en páginas, tamaño o SHA.');
   }
   const done=performance.now();
-  $('status').textContent='ÉXITO: dos PDF reales recibidos y verificados correctamente.';
+  $('status').textContent=confirmation.deletedAfterVerification===true
+   ? 'ÉXITO: dos PDF recibidos, verificados y retirados del almacenamiento.'
+   : '2 PDF verificados. ATENCIÓN: la eliminación del almacenamiento aún no está confirmada.';
   $('result').hidden=false;
   $('result').textContent=JSON.stringify({
    archivos:'2 de 2',
@@ -202,10 +204,10 @@ $('go').addEventListener('click',async()=>{
   $('status').textContent='ERROR EN '+stage.toUpperCase()+'. '+(initiated?'No reintentar.':'Revisá los archivos antes de empezar.');
   $('result').hidden=false;
   $('result').textContent=String(error?.message||'Error no identificado.');
-  if(!initiated){
-   $('files').disabled=false;
-   showSelection(selected);
-  }
- }finally{running=false;}
+  if(!initiated)$('files').disabled=false;
+ }finally{
+  running=false;
+  if(!initiated)showSelection(selected);
+ }
 });
 </script></body></html>
