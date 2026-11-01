@@ -18,19 +18,35 @@ button:disabled{background:#96acbc;cursor:not-allowed}#status{padding:14px 0;fon
 #progress{padding:8px;border:1px solid #d7e0e7;border-radius:8px;min-height:48px}
 #result{white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f6fc;padding:12px;border-radius:8px}
 aside{color:#516274;font-size:13px;margin-top:15px}
+#drop{margin:14px 0;padding:22px;border:2px dashed #5796c9;border-radius:12px;background:#f5faff;cursor:pointer;text-align:center}
+#drop.dragging{border-color:#f47e24;background:#fff5ea}
+#drop input{display:block;margin:12px auto;max-width:100%}
+#files-list{font-size:14px;line-height:1.5;margin:9px 0 17px;padding:0;list-style:none}
+#files-list li{padding:6px 4px;border-bottom:1px solid #ebf0f4;overflow-wrap:anywhere}
+#go{display:block;margin:12px 0}
+.note{background:#fff3e6;padding:10px 12px;border-left:4px solid #f47e24}
+#status{overflow-wrap:anywhere}
+
 </style>
 </head><body>
 <main>
 <header><b class="logo">S</b><div><b>LIBRERÍA SABER</b><div><span>Laboratorio privado • Supabase Storage TUS</span></div></div></header>
 <article>
-<h1>Prueba automática con dos PDF</h1>
-<p>Genera dos PDF sintéticos de 16 y 94 páginas, ahora con aproximadamente <b>5 y 9 MiB</b> de datos aleatorios para medir transferencia de archivos grandes. Verifica páginas y SHA-256 desde el servidor. No utiliza documentos de clientes.</p>
-<p><b>Esta invitación funciona una sola vez.</b> El ensayo no genera pedidos ni cobra.</p>
-<button id="go">Probar recepción de 2 PDF</button>
-<div id="status" role="status">Listo para iniciar.</div>
+<h1>Probá tus PDF reales</h1>
+<p>Elegí <b>exactamente 2 archivos PDF</b> de tu computadora (hasta <b>20 MiB cada uno</b>). Podés seleccionarlos juntos o arrastrarlos aquí. Vamos a medir la subida directa a Supabase, la integridad SHA-256 y las páginas verificadas.</p>
+<p class="note"><b>Laboratorio privado, no comercial:</b> usá documentos tuyos o públicos, sin datos confidenciales de clientes. No se cotiza, no se cobran pedidos ni se registra una orden de trabajo.</p>
+<div id="drop" role="group" aria-label="Elegir dos PDF">
+ <strong>Arrastrá aquí tus dos PDF</strong>
+ <input id="files" type="file" multiple accept=".pdf,application/pdf" aria-label="Seleccionar dos archivos PDF">
+ <span>O pulsá «Elegir archivos» para seleccionarlos juntos.</span>
+</div>
+<ul id="files-list" aria-live="polite"><li>Ningún archivo seleccionado.</li></ul>
+<p><b>Invitación de un solo uso.</b> Revisamos ambos PDF en el navegador antes de iniciar la subida. Si falla el envío, no vuelvas a pulsar el botón: mandame una captura.</p>
+<button id="go" disabled>Enviar y verificar mis 2 PDF</button>
+<div id="status" role="status" aria-live="polite">Seleccioná dos PDF para habilitar la prueba.</div>
 <div id="progress"></div>
 <pre id="result" hidden></pre>
-<aside>Esta segunda prueba mide carga y verificación de unos 14 MiB sintéticos. No reproduce la complejidad de planos, imágenes ni el circuito de presupuestos y pedidos.</aside>
+<aside>El contenido se almacena temporalmente en un bucket privado de Supabase. En caso de éxito, el laboratorio lo elimina después de verificarlo. No utilices información privada de terceros.</aside>
 </article></main>
 <script type="module">
 const $=id=>document.getElementById(id);
@@ -38,130 +54,158 @@ const startUrl='https://qkbbqzbannyhuanngjpw.supabase.co/functions/v1/lab-tus-on
 const verifyUrl='https://qkbbqzbannyhuanngjpw.supabase.co/functions/v1/lab-tus-one-use/verify';
 const access=new URLSearchParams(location.hash.slice(1)).get('k')||'';
 history.replaceState(null,'',location.pathname);
-const targets=[{pages:16,padBytes:5*1024*1024},{pages:94,padBytes:9*1024*1024}];
-const mib=bytes=>(bytes/1024/1024).toFixed(2);
-const seconds=ms=>(ms/1000).toFixed(2);
-$('go').onclick=async()=>{
- $('go').disabled=true;
+const LIMIT=20*1024*1024;
+const mib=n=>(n/(1024*1024)).toFixed(2);
+const secs=n=>(n/1000).toFixed(2);
+let selected=[];
+let initiated=false;
+let running=false;
+function showSelection(files){
+ if(initiated||running)return;
+ selected=Array.from(files||[]);
+ const list=$('files-list');
+ list.replaceChildren();
+ for(const file of selected){
+  const li=document.createElement('li');
+  li.textContent=file.name+' — '+mib(file.size)+' MiB';
+  list.append(li);
+ }
+ if(!selected.length){const li=document.createElement('li');li.textContent='Ningún archivo seleccionado.';list.append(li)}
+ const countValid=selected.length===2;
+ const validSize=selected.every(f=>f.size>=5&&f.size<=LIMIT);
+ const validType=selected.every(f=>/\.pdf$/i.test(f.name));
+ $('go').disabled=!(countValid&&validSize&&validType);
+ $('status').textContent=!countValid?'Seleccioná exactamente 2 PDF.'
+   :!validSize?'Cada PDF debe pesar menos de 20 MiB y no estar vacío.'
+   :!validType?'Solamente se permiten PDF.'
+   :'Listo: 2 PDF seleccionados. Pulsá «Enviar y verificar mis 2 PDF» una sola vez.';
+}
+$('files').addEventListener('change',()=>showSelection($('files').files));
+const drop=$('drop');
+drop.addEventListener('dragenter',e=>{e.preventDefault();drop.classList.add('dragging')});
+drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('dragging')});
+drop.addEventListener('dragleave',e=>{e.preventDefault();drop.classList.remove('dragging')});
+drop.addEventListener('drop',e=>{
+ e.preventDefault();drop.classList.remove('dragging');
+ showSelection(e.dataTransfer?.files||[]);
+});
+$('go').addEventListener('click',async()=>{
+ if(running||initiated)return;
+ if(selected.length!==2)return showSelection(selected);
+ running=true;$('go').disabled=true;$('files').disabled=true;
  $('result').hidden=true;
- let stage='inicio';
- const t0=performance.now();
+ let stage='preparación local';
+ let t0=performance.now(), ready, authorized, uploadStart, uploadEnd;
  try{
-  if(!/^[a-f0-9]{64}$/.test(access))throw Error('Enlace privado inválido o ausente.');
+  if(!/^[a-f0-9]{64}$/.test(access))throw Error('Invitación de prueba ausente o vencida.');
   const {Uppy,Dashboard,Tus}=await import('https://releases.transloadit.com/uppy/v3.6.1/uppy.min.mjs');
   const {PDFDocument}=await import('https://esm.sh/pdf-lib@1.17.1');
-  stage='generando PDF grandes';
-  const generated=[];
-  for(let i=0;i<2;i++){
-   const {pages,padBytes}=targets[i];
-   $('status').textContent='Preparando PDF '+(i+1)+' de 2 ('+(padBytes/1024/1024)+' MiB de datos sintéticos)…';
-   const doc=await PDFDocument.create();
-   for(let j=0;j<pages;j++)doc.addPage([595.28,841.89]);
-   // Datos aleatorios, prácticamente incompresibles. Medimos transporte;
-   // no simulamos tinta, gráficos, CAD ni archivos de clientes.
-   const entropy=new Uint8Array(padBytes);
-   for(let pos=0;pos<entropy.length;pos+=65536)
-    crypto.getRandomValues(entropy.subarray(pos,Math.min(pos+65536,entropy.length)));
-   await doc.attach(entropy,'relleno_sintetico_'+(i+1)+'.bin',{
-    mimeType:'application/octet-stream',
-    description:'Datos aleatorios de laboratorio; no contienen información personal',
-   });
-   const bytes=await doc.save();
-   if(bytes.byteLength<padBytes || bytes.byteLength>20*1024*1024)
-    throw Error('El PDF generado no cumple el tamaño esperado para la prueba.');
-   const digest=await crypto.subtle.digest('SHA-256',bytes);
-   const hex=Array.from(new Uint8Array(digest)).map(v=>v.toString(16).padStart(2,'0')).join('');
-   const name='ensayo_'+pages+'_paginas_'+mib(bytes.byteLength)+'MiB.pdf';
-   generated.push({
-    name,pages,bytes:bytes.byteLength,hash:hex,
-    file:new File([bytes],name,{type:'application/pdf'}),
-   });
+  const checked=[];
+  for(let i=0;i<selected.length;i++){
+   const file=selected[i];
+   if(!/\.pdf$/i.test(file.name)||file.size<5||file.size>LIMIT)
+    throw Error('Archivo '+(i+1)+' fuera del límite permitido.');
+   $('status').textContent='Leyendo y comprobando localmente PDF '+(i+1)+' de 2…';
+   const buffer=await file.arrayBuffer();
+   const data=new Uint8Array(buffer);
+   if(String.fromCharCode(...data.subarray(0,5))!=='%PDF-')
+    throw Error('El archivo '+(i+1)+' no tiene cabecera PDF válida.');
+   let pages=0;
+   try{
+    const pdf=await PDFDocument.load(data,{ignoreEncryption:false,throwOnInvalidObject:true,updateMetadata:false});
+    pages=pdf.getPageCount();
+   }catch(_){throw Error('No puedo leer las páginas del PDF '+(i+1)+'. Probá otro PDF sin contraseña.');}
+   if(!Number.isSafeInteger(pages)||pages<1||pages>2000)
+    throw Error('El PDF '+(i+1)+' supera el límite de 2.000 páginas.');
+   const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',buffer)))
+    .map(x=>x.toString(16).padStart(2,'0')).join('');
+   checked.push({file,pages,bytes:file.size,sha256:hash});
   }
-  const generatedAt=performance.now();
-  stage='autorizando dos PDF';
-  $('status').textContent='Archivos de '+mib(generated[0].bytes)+' y '+mib(generated[1].bytes)+' MiB listos. Solicitando firmas privadas…';
+  ready=performance.now();
+  stage='autorización privada';
+  $('status').textContent='PDF reales analizados. Solicitando dos permisos privados de subida…';
   const res=await fetch(startUrl,{
-   method:'POST',
-   headers:{'x-lab-token':access,'content-type':'application/json'},
-   body:'{}',
+   method:'POST',headers:{'x-lab-token':access,'content-type':'application/json'},body:'{}',
   });
-  const accessData=await res.json();
-  if(!res.ok||!accessData.ok||accessData.uploads?.length!==2)
-   throw Error('No se pudo autorizar la tanda (HTTP '+res.status+').');
-  const authorizedAt=performance.now();
-  const uu=new Uppy({autoProceed:false,restrictions:{
-   maxNumberOfFiles:2,minNumberOfFiles:2,allowedFileTypes:['.pdf','application/pdf'],
+  const granted=await res.json().catch(()=>null);
+  if(!res.ok||!granted?.ok||granted.uploads?.length!==2)
+   throw Error('No se obtuvo autorización para ambos archivos (HTTP '+res.status+').');
+  initiated=true; authorized=performance.now();
+  const uppy=new Uppy({autoProceed:false,restrictions:{
+   maxNumberOfFiles:2,minNumberOfFiles:2,maxFileSize:LIMIT,allowedFileTypes:['.pdf','application/pdf'],
   }});
-  uu.use(Dashboard,{
-   inline:true,target:'#progress',height:190,hideUploadButton:true,
+  uppy.use(Dashboard,{
+   inline:true,target:'#progress',height:200,hideUploadButton:true,
    showProgressDetails:true,proudlyDisplayPoweredByUppy:false,
   });
-  uu.use(Tus,{
-    endpoint:'https://'+accessData.projectRef+'.storage.supabase.co/storage/v1/upload/resumable/sign',
-    headers:file=>({apikey:accessData.apikey,'x-signature':file.meta.labSignature}),
-    uploadDataDuringCreation:true,
-    retryDelays:[0,1200,3000],
-    chunkSize:6*1024*1024,limit:2,
-    allowedMetaFields:['bucketName','objectName','contentType','cacheControl'],
+  uppy.use(Tus,{
+   endpoint:'https://'+granted.projectRef+'.storage.supabase.co/storage/v1/upload/resumable/sign',
+   headers:file=>({apikey:granted.apikey,'x-signature':file.meta.labSignature}),
+   uploadDataDuringCreation:true,retryDelays:[0,1200,3000],
+   removeFingerprintOnSuccess:true,chunkSize:6*1024*1024,limit:2,
+   allowedMetaFields:['bucketName','objectName','contentType','cacheControl'],
   });
-  const fileDescriptors=[];
+  const receipt=[];
   for(let i=0;i<2;i++){
-   const {name,pages,bytes,hash,file}=generated[i];
-   const id=uu.addFile({name,type:'application/pdf',data:file,source:'laboratorio'});
-   uu.setFileMeta(id,{
-    bucketName:accessData.bucket,objectName:accessData.uploads[i].objectName,
-    contentType:'application/pdf',cacheControl:'0',
-    labSignature:accessData.uploads[i].signature,
+   const entry=checked[i],signed=granted.uploads[i];
+   const id=uppy.addFile({
+    name:entry.file.name,type:'application/pdf',data:entry.file,source:'laboratorio',
    });
-   fileDescriptors.push({
-    objectName:accessData.uploads[i].objectName,
-    expectedSha256:hash,pages,bytes,
+   uppy.setFileMeta(id,{
+    bucketName:granted.bucket,objectName:signed.objectName,
+    contentType:'application/pdf',cacheControl:'0',labSignature:signed.signature,
+   });
+   receipt.push({
+    objectName:signed.objectName,expectedSha256:entry.sha256,
+    pages:entry.pages,bytes:entry.bytes,name:entry.file.name,
    });
   }
-  const uploadStarted=performance.now();
-  stage='subiendo PDF grandes';
-  $('status').textContent='Subiendo '+mib(fileDescriptors[0].bytes)+' y '+mib(fileDescriptors[1].bytes)+' MiB directamente a Supabase…';
-  const outcome=await uu.upload();
-  const uploadFinished=performance.now();
-  if(outcome.failed?.length||outcome.successful?.length!==2)
-   throw Error('La transferencia TUS no finalizó para ambos PDF.');
-  stage='verificando integridad y páginas';
-  $('status').textContent='Dos PDF subidos. Verificando SHA-256, tamaño y páginas desde el servidor…';
-  const check=await fetch(verifyUrl,{
-   method:'POST',
-   headers:{'x-lab-token':access,'content-type':'application/json'},
-   body:JSON.stringify({
-    files:fileDescriptors.map(({objectName,expectedSha256})=>({objectName,expectedSha256})),
-   }),
+  uploadStart=performance.now();
+  stage='transferencia';
+  $('status').textContent='Subiendo 2 PDF ('+mib(checked[0].bytes+checked[1].bytes)+' MiB) directamente a Supabase…';
+  const uploaded=await uppy.upload();
+  uploadEnd=performance.now();
+  if(uploaded.failed?.length||uploaded.successful?.length!==2)
+   throw Error('TUS no confirmó la transferencia completa de los dos archivos.');
+  stage='verificación en servidor';
+  $('status').textContent='Ambos PDF subidos. Comprobando SHA-256, tamaño y páginas reales…';
+  const v=await fetch(verifyUrl,{
+   method:'POST',headers:{'x-lab-token':access,'content-type':'application/json'},
+   body:JSON.stringify({files:receipt.map(({objectName,expectedSha256})=>({objectName,expectedSha256}))}),
   });
-  const confirmation=await check.json();
-  if(!check.ok||!confirmation.ok||confirmation.verified!==2)
-   throw Error('El servidor no confirmó ambos PDF (HTTP '+check.status+').');
-  for(let i=0;i<2;i++)
-   if(confirmation.files[i].pages!==fileDescriptors[i].pages||
+  const confirmation=await v.json().catch(()=>null);
+  if(!v.ok||!confirmation?.ok||confirmation.verified!==2)
+   throw Error('Falló la verificación de los PDF en el servidor (HTTP '+v.status+').');
+  for(let i=0;i<2;i++){
+   if(confirmation.files[i].pages!==receipt[i].pages||
       !confirmation.files[i].sha256Match||
-      confirmation.files[i].bytes!==fileDescriptors[i].bytes)
-    throw Error('SHA-256, bytes o número de páginas distintos de los originales.');
+      confirmation.files[i].bytes!==receipt[i].bytes)
+    throw Error('El PDF '+(i+1)+' no coincide en páginas, tamaño o SHA.');
+  }
   const done=performance.now();
-  $('status').textContent='ÉXITO: dos PDF grandes recibidos y verificados, sin pedidos ni cobros.';
+  $('status').textContent='ÉXITO: dos PDF reales recibidos y verificados correctamente.';
   $('result').hidden=false;
   $('result').textContent=JSON.stringify({
-   verificados:'2 de 2',
-   paginas:fileDescriptors.map(f=>f.pages),
-   tamanosMiB:fileDescriptors.map(f=>mib(f.bytes)),
-   integridadSHA256:'verificada servidor',
-   tiempoTotalSegundos:seconds(done-t0),
-   tiempoGeneracionSegundos:seconds(generatedAt-t0),
-   tiempoAutorizacionSegundos:seconds(authorizedAt-generatedAt),
-   tiempoSubidaSegundos:seconds(uploadFinished-uploadStarted),
-   tiempoVerificacionSegundos:seconds(done-uploadFinished),
-   fragmentoTUSMiB:6,
+   archivos:'2 de 2',
+   paginas:receipt.map(x=>x.pages),
+   tamanosMiB:receipt.map(x=>mib(x.bytes)),
+   integridadSHA256:'correcta',
+   tiempoTotalSegundos:secs(done-t0),
+   tiempoLecturaLocalSegundos:secs(ready-t0),
+   tiempoAutorizacionSegundos:secs(authorized-ready),
+   tiempoTransferenciaSegundos:secs(uploadEnd-uploadStart),
+   tiempoVerificacionSegundos:secs(done-uploadEnd),
+   eliminadosDelAlmacenamiento:confirmation.deletedAfterVerification===true,
    pedidosRegistrados:0,cobros:false,
   },null,2);
  }catch(error){
-  $('status').textContent='ERROR EN '+stage.toUpperCase()+'. No reintentar.';
+  $('status').textContent='ERROR EN '+stage.toUpperCase()+'. '+(initiated?'No reintentar.':'Revisá los archivos antes de empezar.');
   $('result').hidden=false;
   $('result').textContent=String(error?.message||'Error no identificado.');
- }
-};
+  if(!initiated){
+   $('files').disabled=false;
+   showSelection(selected);
+  }
+ }finally{running=false;}
+});
 </script></body></html>
