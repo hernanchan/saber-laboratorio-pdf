@@ -207,7 +207,10 @@ $('go').addEventListener('click',async()=>{
   if(!initiated)$('files').disabled=false;
  }finally{
   running=false;
-  if(!initiated)showSelection(selected);
+  if(!initiated){
+   $('files').disabled=false;
+   $('go').disabled=!(selected.length===2&&selected.every(f=>f.size>=5&&f.size<=LIMIT&&/\.pdf$/i.test(f.name)));
+  }
  }
 });
 </script></body></html>
