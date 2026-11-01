@@ -57,7 +57,7 @@ $('go').onclick=async()=>{
   uu.use(Dashboard,{inline:true,target:'#progress',height:190,hideUploadButton:true,showProgressDetails:true,proudlyDisplayPoweredByUppy:false});
   uu.use(Tus,{
     endpoint:'https://'+accessData.projectRef+'.storage.supabase.co/storage/v1/upload/resumable/sign',
-    headers:{apikey:accessData.apikey},uploadDataDuringCreation:true,
+    headers:file=>({apikey:accessData.apikey,'x-signature':file.meta.labSignature}),uploadDataDuringCreation:true,
     retryDelays:[0,1200,3000],chunkSize:6*1024*1024,limit:2,
     allowedMetaFields:['bucketName','objectName','contentType','cacheControl'],
   });
@@ -73,8 +73,7 @@ $('go').onclick=async()=>{
    const name='ensayo_'+pages+'_paginas.pdf';
    const file=new File([bytes],name,{type:'application/pdf'});
    const id=uu.addFile({name,type:'application/pdf',data:file,source:'laboratorio'});
-   uu.setFileMeta(id,{bucketName:accessData.bucket,objectName:accessData.uploads[i].objectName,contentType:'application/pdf',cacheControl:'0'});
-   uu.setFileState(id,{tus:{headers:{'x-signature':accessData.uploads[i].signature}}});
+   uu.setFileMeta(id,{bucketName:accessData.bucket,objectName:accessData.uploads[i].objectName,contentType:'application/pdf',cacheControl:'0',labSignature:accessData.uploads[i].signature});
    fileDescriptors.push({objectName:accessData.uploads[i].objectName,expectedSha256:hex,pages,bytes:bytes.byteLength});
   }
   const uploadStarted=performance.now();
