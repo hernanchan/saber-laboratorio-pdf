@@ -52,8 +52,30 @@ aside{color:#516274;font-size:13px;margin-top:15px}
 const $=id=>document.getElementById(id);
 const startUrl='https://qkbbqzbannyhuanngjpw.supabase.co/functions/v1/lab-tus-one-use/start';
 const verifyUrl='https://qkbbqzbannyhuanngjpw.supabase.co/functions/v1/lab-tus-one-use/verify';
-const access=new URLSearchParams(location.hash.slice(1)).get('k')||'';
-history.replaceState(null,'',location.pathname);
+// La invitación viaja en el fragmento (#k=...), no llega al servidor de Pages.
+// Guardarla solamente para esta pestaña evita perderla al recargar.
+const INVITE_KEY='saberLabRealPdfInvite';
+function loadAccess(){
+ const supplied=new URLSearchParams(location.hash.slice(1)).get('k')||'';
+ const valid=value=>/^[a-f0-9]{64}$/.test(value);
+ let key=valid(supplied)?supplied:'';
+ try{
+  if(key)sessionStorage.setItem(INVITE_KEY,key);
+  else{
+   const saved=sessionStorage.getItem(INVITE_KEY)||'';
+   if(valid(saved))key=saved;
+   else sessionStorage.removeItem(INVITE_KEY);
+  }
+ }catch(_){ /* Si la sesión no permite almacenamiento, funciona el enlace original. */ }
+ if(location.hash)history.replaceState(null,'',location.pathname+location.search);
+ return key;
+}
+let access=loadAccess();
+const hasInvite=()=>/^[a-f0-9]{64}$/.test(access);
+function clearInvite(){
+ access='';
+ try{sessionStorage.removeItem(INVITE_KEY)}catch(_){}
+}
 const LIMIT=20*1024*1024;
 const mib=n=>(n/(1024*1024)).toFixed(2);
 const secs=n=>(n/1000).toFixed(2);
@@ -74,8 +96,10 @@ function showSelection(files){
  const countValid=selected.length===2;
  const validSize=selected.every(f=>f.size>=5&&f.size<=LIMIT);
  const validType=selected.every(f=>/\.pdf$/i.test(f.name));
- $('go').disabled=!(countValid&&validSize&&validType);
- $('status').textContent=!countValid?'Seleccioná exactamente 2 PDF.'
+ $('go').disabled=!(hasInvite()&&countValid&&validSize&&validType);
+ $('status').textContent=!hasInvite()
+   ?'Falta la invitación privada. Abrí el enlace COMPLETO que te envié en ChatGPT; no uses esta pestaña desde Favoritos.'
+   :!countValid?'Seleccioná exactamente 2 PDF.'
    :!validSize?'Cada PDF debe pesar menos de 20 MiB y no estar vacío.'
    :!validType?'Solamente se permiten PDF.'
    :'Listo: 2 PDF seleccionados. Pulsá «Enviar y verificar mis 2 PDF» una sola vez.';
@@ -97,7 +121,7 @@ $('go').addEventListener('click',async()=>{
  let stage='preparación local';
  let t0=performance.now(), ready, authorized, uploadStart, uploadEnd;
  try{
-  if(!/^[a-f0-9]{64}$/.test(access))throw Error('Invitación de prueba ausente o vencida.');
+  if(!hasInvite())throw Error('Falta la invitación privada. Abrí el enlace COMPLETO enviado por ChatGPT.');
   const {Uppy,Dashboard,Tus}=await import('https://releases.transloadit.com/uppy/v3.6.1/uppy.min.mjs');
   const {PDFDocument}=await import('https://esm.sh/pdf-lib@1.17.1');
   const checked=[];
@@ -131,6 +155,7 @@ $('go').addEventListener('click',async()=>{
   if(!res.ok||!granted?.ok||granted.uploads?.length!==2)
    throw Error('No se obtuvo autorización para ambos archivos (HTTP '+res.status+').');
   initiated=true; authorized=performance.now();
+  clearInvite(); // Desde este punto el servidor ya consumió el uso único.
   const uppy=new Uppy({autoProceed:false,restrictions:{
    maxNumberOfFiles:2,minNumberOfFiles:2,maxFileSize:LIMIT,allowedFileTypes:['.pdf','application/pdf'],
   }});
@@ -209,8 +234,9 @@ $('go').addEventListener('click',async()=>{
   running=false;
   if(!initiated){
    $('files').disabled=false;
-   $('go').disabled=!(selected.length===2&&selected.every(f=>f.size>=5&&f.size<=LIMIT&&/\.pdf$/i.test(f.name)));
+   $('go').disabled=!(hasInvite()&&selected.length===2&&selected.every(f=>f.size>=5&&f.size<=LIMIT&&/\.pdf$/i.test(f.name)));
   }
  }
 });
+showSelection([]);
 </script></body></html>
