@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://releases.transloadit.com https://esm.sh; style-src 'self' 'unsafe-inline' https://releases.transloadit.com; connect-src 'self' https://qkbbqzbannyhuanngjpw.supabase.co https://qkbbqzbannyhuanngjpw.storage.supabase.co https://esm.sh https://releases.transloadit.com; img-src 'self' data: blob:; font-src 'self' data:">
+<title>Librería Saber — prueba privada de PDF</title>
+<link rel="stylesheet" href="https://releases.transloadit.com/uppy/v3.6.1/uppy.min.css">
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#183451;background:#eaf1f8}
+*{box-sizing:border-box}body{margin:0}main{max-width:850px;margin:0 auto;padding:22px}
+header{background:#0e355a;border-radius:10px;color:white;padding:18px 20px;display:flex;align-items:center;gap:12px}
+.logo{background:#f47e24;color:white;padding:8px 13px;border-radius:50%;font-size:23px;font-weight:800}
+header span{font-size:13px}article{background:white;border:1px solid #d3dfe9;border-radius:12px;margin-top:16px;padding:20px}
+h1{font-size:22px;margin:0 0 12px}p{font-size:15px;line-height:1.5}
+button{font-size:16px;background:#0b679a;border:0;border-radius:7px;color:white;padding:14px 18px;cursor:pointer;font-weight:700}
+button:disabled{background:#96acbc;cursor:not-allowed}#status{padding:14px 0;font-weight:600}
+#progress{padding:8px;border:1px solid #d7e0e7;border-radius:8px;min-height:48px}
+#result{white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f6fc;padding:12px;border-radius:8px}
+aside{color:#516274;font-size:13px;margin-top:15px}
+#drop{margin:14px 0;padding:22px;border:2px dashed #5796c9;border-radius:12px;background:#f5faff;cursor:pointer;text-align:center}
+#drop.dragging{border-color:#f47e24;background:#fff5ea}
+#drop input{display:block;margin:12px auto;max-width:100%}
+#files-list{font-size:14px;line-height:1.5;margin:9px 0 17px;padding:0;list-style:none}
+#files-list li{padding:6px 4px;border-bottom:1px solid #ebf0f4;overflow-wrap:anywhere}
+#go{display:block;margin:12px 0}
+.note{background:#fff3e6;padding:10px 12px;border-left:4px solid #f47e24}
+#status{overflow-wrap:anywhere}
+
+</style>
+</head><body>
+<main>
+<header><b class="logo">S</b><div><b>LIBRERÍA SABER</b><div><span>Laboratorio privado • Supabase Storage TUS</span></div></div></header>
+<article>
+<h1>Probá tus PDF reales</h1>
+<p>Elegí <b>exactamente 2 archivos PDF</b> de tu computadora (hasta <b>20 MiB cada uno</b>). Podés seleccionarlos juntos o arrastrarlos aquí. Vamos a medir la subida directa a Supabase, la integridad SHA-256 y las páginas verificadas.</p>
+<p class="note"><b>Laboratorio privado, no comercial:</b> usá documentos tuyos o públicos, sin datos confidenciales de clientes. No se cotiza, no se cobran pedidos ni se registra una orden de trabajo.</p>
+<div id="drop" role="group" aria-label="Elegir dos PDF">
+ <strong>Arrastrá aquí tus dos PDF</strong>
+ <input id="files" type="file" multiple accept=".pdf,application/pdf" aria-label="Seleccionar dos archivos PDF">
+ <span>O pulsá «Elegir archivos» para seleccionarlos juntos.</span>
+</div>
+<ul id="files-list" aria-live="polite"><li>Ningún archivo seleccionado.</li></ul>
+<p><b>Invitación de un solo uso.</b> Revisamos ambos PDF en el navegador antes de iniciar la subida. Si falla el envío, no vuelvas a pulsar el botón: mandame una captura.</p>
+<button id="go" disabled>Enviar y verificar mis 2 PDF</button>
+<div id="status" role="status" aria-live="polite">Seleccioná dos PDF para habilitar la prueba.</div>
+<div id="progress"></div>
+<pre id="result" hidden></pre>
+<aside>El contenido se almacena temporalmente en un bucket privado de Supabase. En caso de éxito, el laboratorio lo elimina después de verificarlo. No utilices información privada de terceros.</aside>
+</article></main>
+<script type="module">
+const $=id=>document.getElementById(id);
+const startUrl='https://qkbbqzbannyhuanngjpw.supabase.co/functions/v1/lab-tus-one-use/start';
+const verifyUrl='https://qkbbqzbannyhuanngjpw.supabase.co/functions/v1/lab-tus-one-use/verify';
+const access=new URLSearchParams(location.hash.slice(1)).get('k')||'';
+history.replaceState(null,'',location.pathname);
+const LIMIT=20*1024*1024;
+const mib=n=>(n/(1024*1024)).toFixed(2);
+const secs=n=>(n/1000).toFixed(2);
+let selected=[];
+let initiated=false;
+let running=false;
+function showSelection(files){
+ if(initiated||running)return;
+ selected=Array.from(files||[]);
+ const list=$('files-list');
+ list.replaceChildren();
+ for(const file of selected){
+  const li=document.createElement('li');
+  li.textContent=file.name+' — '+mib(file.size)+' MiB';
+  list.append(li);
+ }
+ if(!selected.length){const li=document.createElement('li');li.textContent='Ningún archivo seleccionado.';list.append(li)}
+ const countValid=selected.length===2;
+ const validSize=selected.every(f=>f.size>=5&&f.size<=LIMIT);
+ const validType=selected.every(f=>/\.pdf$/i.test(f.name));
+ $('go').disabled=!(countValid&&validSize&&validType);
+ $('status').textContent=!countValid?'Seleccioná exactamente 2 PDF.'
+   :!validSize?'Cada PDF debe pesar menos de 20 MiB y no estar vacío.'
+   :!validType?'Solamente se permiten PDF.'
+   :'Listo: 2 PDF seleccionados. Pulsá «Enviar y verificar mis 2 PDF» una sola vez.';
+}
+$('files').addEventListener('change',()=>showSelection($('files').files));
+const drop=$('drop');
+drop.addEventListener('dragenter',e=>{e.preventDefault();drop.classList.add('dragging')});
+drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('dragging')});
+drop.addEventListener('dragleave',e=>{e.preventDefault();drop.classList.remove('dragging')});
+drop.addEventListener('drop',e=>{
+ e.preventDefault();drop.classList.remove('dragging');
+ showSelection(e.dataTransfer?.files||[]);
+});
+$('go').addEventListener('click',async()=>{
+ if(running||initiated)return;
+ if(selected.length!==2)return showSelection(selected);
+ running=true;$('go').disabled=true;$('files').disabled=true;
+ $('result').hidden=true;
+ let stage='preparación local';
+ let t0=performance.now(), ready, authorized, uploadStart, uploadEnd;
+ try{
+  if(!/^[a-f0-9]{64}$/.test(access))throw Error('Invitación de prueba ausente o vencida.');
+  const {Uppy,Dashboard,Tus}=await import('https://releases.transloadit.com/uppy/v3.6.1/uppy.min.mjs');
+  const {PDFDocument}=await import('https://esm.sh/pdf-lib@1.17.1');
+  const checked=[];
+  for(let i=0;i<selected.length;i++){
+   const file=selected[i];
+   if(!/\.pdf$/i.test(file.name)||file.size<5||file.size>LIMIT)
+    throw Error('Archivo '+(i+1)+' fuera del límite permitido.');
+   $('status').textContent='Leyendo y comprobando localmente PDF '+(i+1)+' de 2…';
+   const buffer=await file.arrayBuffer();
+   const data=new Uint8Array(buffer);
+   if(String.fromCharCode(...data.subarray(0,5))!=='%PDF-')
+    throw Error('El archivo '+(i+1)+' no tiene cabecera PDF válida.');
+   let pages=0;
+   try{
+    const pdf=await PDFDocument.load(data,{ignoreEncryption:false,throwOnInvalidObject:true,updateMetadata:false});
+    pages=pdf.getPageCount();
+   }catch(_){throw Error('No puedo leer las páginas del PDF '+(i+1)+'. Probá otro PDF sin contraseña.');}
+   if(!Number.isSafeInteger(pages)||pages<1||pages>2000)
+    throw Error('El PDF '+(i+1)+' supera el límite de 2.000 páginas.');
+   const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',buffer)))
+    .map(x=>x.toString(16).padStart(2,'0')).join('');
+   checked.push({file,pages,bytes:file.size,sha256:hash});
+  }
+  ready=performance.now();
+  stage='autorización privada';
+  $('status').textContent='PDF reales analizados. Solicitando dos permisos privados de subida…';
+  const res=await fetch(startUrl,{
+   method:'POST',headers:{'x-lab-token':access,'content-type':'application/json'},body:'{}',
+  });
+  const granted=await res.json().catch(()=>null);
+  if(!res.ok||!granted?.ok||granted.uploads?.length!==2)
+   throw Error('No se obtuvo autorización para ambos archivos (HTTP '+res.status+').');
+  initiated=true; authorized=performance.now();
+  const uppy=new Uppy({autoProceed:false,restrictions:{
+   maxNumberOfFiles:2,minNumberOfFiles:2,maxFileSize:LIMIT,allowedFileTypes:['.pdf','application/pdf'],
+  }});
+  uppy.use(Dashboard,{
+   inline:true,target:'#progress',height:200,hideUploadButton:true,
+   showProgressDetails:true,proudlyDisplayPoweredByUppy:false,
+  });
+  uppy.use(Tus,{
+   endpoint:'https://'+granted.projectRef+'.storage.supabase.co/storage/v1/upload/resumable/sign',
+   headers:file=>({apikey:granted.apikey,'x-signature':file.meta.labSignature}),
+   uploadDataDuringCreation:true,retryDelays:[0,1200,3000],
+   removeFingerprintOnSuccess:true,chunkSize:6*1024*1024,limit:2,
+   allowedMetaFields:['bucketName','objectName','contentType','cacheControl'],
+  });
+  const receipt=[];
+  for(let i=0;i<2;i++){
+   const entry=checked[i],signed=granted.uploads[i];
+   const id=uppy.addFile({
+    name:entry.file.name,type:'application/pdf',data:entry.file,source:'laboratorio',
+   });
+   uppy.setFileMeta(id,{
+    bucketName:granted.bucket,objectName:signed.objectName,
+    contentType:'application/pdf',cacheControl:'0',labSignature:signed.signature,
+   });
+   receipt.push({
+    objectName:signed.objectName,expectedSha256:entry.sha256,
+    pages:entry.pages,bytes:entry.bytes,name:entry.file.name,
+   });
+  }
+  uploadStart=performance.now();
+  stage='transferencia';
+  $('status').textContent='Subiendo 2 PDF ('+mib(checked[0].bytes+checked[1].bytes)+' MiB) directamente a Supabase…';
+  const uploaded=await uppy.upload();
+  uploadEnd=performance.now();
+  if(uploaded.failed?.length||uploaded.successful?.length!==2)
+   throw Error('TUS no confirmó la transferencia completa de los dos archivos.');
+  stage='verificación en servidor';
+  $('status').textContent='Ambos PDF subidos. Comprobando SHA-256, tamaño y páginas reales…';
+  const v=await fetch(verifyUrl,{
+   method:'POST',headers:{'x-lab-token':access,'content-type':'application/json'},
+   body:JSON.stringify({files:receipt.map(({objectName,expectedSha256})=>({objectName,expectedSha256}))}),
+  });
+  const confirmation=await v.json().catch(()=>null);
+  if(!v.ok||!confirmation?.ok||confirmation.verified!==2)
+   throw Error('Falló la verificación de los PDF en el servidor (HTTP '+v.status+').');
+  for(let i=0;i<2;i++){
+   if(confirmation.files[i].pages!==receipt[i].pages||
+      !confirmation.files[i].sha256Match||
+      confirmation.files[i].bytes!==receipt[i].bytes)
+    throw Error('El PDF '+(i+1)+' no coincide en páginas, tamaño o SHA.');
+  }
+  const done=performance.now();
+  $('status').textContent=confirmation.deletedAfterVerification===true
+   ? 'ÉXITO: dos PDF recibidos, verificados y retirados del almacenamiento.'
+   : '2 PDF verificados. ATENCIÓN: la eliminación del almacenamiento aún no está confirmada.';
+  $('result').hidden=false;
+  $('result').textContent=JSON.stringify({
+   archivos:'2 de 2',
+   paginas:receipt.map(x=>x.pages),
+   tamanosMiB:receipt.map(x=>mib(x.bytes)),
+   integridadSHA256:'correcta',
+   tiempoTotalSegundos:secs(done-t0),
+   tiempoLecturaLocalSegundos:secs(ready-t0),
+   tiempoAutorizacionSegundos:secs(authorized-ready),
+   tiempoTransferenciaSegundos:secs(uploadEnd-uploadStart),
+   tiempoVerificacionSegundos:secs(done-uploadEnd),
+   eliminadosDelAlmacenamiento:confirmation.deletedAfterVerification===true,
+   pedidosRegistrados:0,cobros:false,
+  },null,2);
+ }catch(error){
+  $('status').textContent='ERROR EN '+stage.toUpperCase()+'. '+(initiated?'No reintentar.':'Revisá los archivos antes de empezar.');
+  $('result').hidden=false;
+  $('result').textContent=String(error?.message||'Error no identificado.');
+  if(!initiated)$('files').disabled=false;
+ }finally{
+  running=false;
+  if(!initiated){
+   $('files').disabled=false;
+   $('go').disabled=!(selected.length===2&&selected.every(f=>f.size>=5&&f.size<=LIMIT&&/\.pdf$/i.test(f.name)));
+  }
+ }
+});
+</script></body></html>
