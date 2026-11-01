@@ -1,25 +1,25 @@
 # Librería Saber — Laboratorio aislado de recepción PDF
 
-**Este repositorio no contiene la web comercial ni el cotizador.** La prueba sirve exclusivamente para comprobar la recepción privada de dos documentos sintéticos mediante **Uppy/TUS + Supabase Storage**.
+Proyecto público de **interfaz únicamente**. No es la web comercial ni el cotizador, no contiene archivos de clientes, claves privadas ni tokens de invitación.
 
-## Estado
+## Prueba actual con dos PDF REALES
 
-- Sitio estático: `index.html`, con archivos PDF de 16 y 94 páginas generados automáticamente en el navegador.
-- Bucket privado en el proyecto Free `saber-tus-lab`: `public=false`, sin permisos públicos de escritura o lectura.
-- Backend `lab-tus-one-use` de Supabase: emite dos firmas de carga con invitación temporal y verifica SHA-256, bytes y páginas.
-- **GitHub Pages requiere activación en la configuración de este repositorio; no se ha confirmado la publicación.**
-- **No se ha ejecutado aún una prueba TUS completa.** La página negra anterior fue causada por `text/plain` forzado por Supabase Edge y se evita alojando aquí el HTML.
+- Página: `/reales/` — dos PDF que el usuario selecciona (o arrastra), **máximo 20 MiB cada uno**.
+- Antes de usar la invitación de una sola vez: verifica formato `%PDF-`, tamaño, páginas en navegador con pdf-lib y calcula SHA-256 del archivo original.
+- Supabase Edge Function `lab-tus-one-use` v3 emite exactamente dos autorizaciones privadas de subida y transmite por **TUS** en paralelo, fragmentos de 6 MiB.
+- Después de la subida, Supabase descarga los documentos desde el bucket privado, comprueba SHA-256 y páginas desde el servidor. **Si ambos se verifican, solicita eliminación de los dos objetos**, y avisa si no se confirma.
+- Página de prueba sin secretos ni credenciales administrativas; se accede con invitación privada `#k=...` solo en el navegador.
+- No hay cotización ni D1 ni Mercado Pago; cero pedidos y cero cobros.
+- **Advertencia:** solo usar documentos propios o públicos sin datos confidenciales de clientes. Es un laboratorio, no un servicio apto para producción.
 
-## Publicar GitHub Pages
+## Estado de pruebas (histórico)
 
-GitHub → Settings → Pages → Build and deployment → Deploy from a branch → `main` / `(root)` → Save.
+La primera prueba real de red con dos PDF **sintéticos diminutos** verificó 2/2 en 6,19 s. La segunda invitación se consumió subiendo nuevamente PDF diminutos (2.252 bytes en total), por lo que no existe todavía un benchmark válido con archivos grandes. La página de PDFs reales fue preparada posteriormente y **aún necesita su primera prueba de usuario**.
 
-Esto afecta únicamente el repositorio `hernanchan/saber-laboratorio-pdf`, no a `hernanchan/COTIZADOR`, que tiene su propio Pages en producción.
+## Configuración
 
-**No hay tokens de acceso dentro del código público.** Para probar se utiliza una URL temporal con token en el fragmento `#k=`, emitida por el laboratorio, no registrada en Git.
+GitHub Pages: rama `main` / `(root)` de **este** repositorio, no `COTIZADOR`. Backend Supabase Free aislado `qkbbqzbannyhuanngjpw`, bucket `saber-tus-lab` privado (20 MiB por archivo, sin INSERT abierto). Edge Function `lab-tus-one-use` con invitación SHA-256 de uso único y origen limitado a GitHub Pages.
 
-## Reglas
+Código del backend y documentación en la rama `experimento/uppy-tus-supabase-20261031` del repositorio `COTIZADOR`, **sin modificar la rama comercial `main`**. La página estática en este repo nuevo. El HTML público no contiene el token de invitación.
 
-No usar PDF de clientes ni datos personales. No registrar pedidos, no activar pagos, no contratar servicios pagos. Una invitación permite **un único inicio** y una sola tanda de dos PDF; si falla, revisar logs antes de intentar nuevamente. Los PDFs pequeños de esta primera prueba no demuestran rendimiento con archivos grandes.
-
-El código de recepción, tests y documentación técnica permanecen en la rama `experimento/uppy-tus-supabase-20261031` del repositorio original `COTIZADOR`, sin promover a su `main`.
+**No declarar aptitud comercial hasta comprobar archivos reales 2/2, cotizaciones, descarga y Central de Pedidos, seguridad, costos y limpieza de errores.**
